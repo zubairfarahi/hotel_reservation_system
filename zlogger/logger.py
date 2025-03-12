@@ -4,10 +4,10 @@ import os
 import inspect
 from functools import wraps
 import sys
-from custom_formatter import CustomFormatter
-from custom_file_rotater import CustomFileRotator
+from .custom_formatter import CustomFormatter
+from .custom_file_rotater import CustomFileRotator
 import time
-from constants import *
+from .constants import *
 import configparser
 
 

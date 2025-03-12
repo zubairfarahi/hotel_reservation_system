@@ -7,3 +7,6 @@ statsmodels
 imbalanced-learn
 xgboost 
 lightgbm
+boto3 
+python-dotenv
+mlflow
