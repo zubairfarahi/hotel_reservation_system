@@ -1,107 +1,156 @@
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import joblib
 import os
+import pandas as pd
+import joblib
+from sklearn.model_selection import RandomizedSearchCV
+import lightgbm as lgb
+from sklearn.metrics import accuracy_score,precision_score,recall_score,f1_score
+from config.model_params import *
+from utils.common_function import read_yaml,load_data
+from scipy.stats import randint
+
 import mlflow
 import mlflow.sklearn
-import mlflow.xgboost
-import mlflow.lightgbm
 
-# Ensure the models directory exists
-os.makedirs("models", exist_ok=True)
+from zlogger.logger import ZLogger
+import configparser
 
-# Load the data from CSV files
-train_df = pd.read_csv("data/train.csv")
-test_df = pd.read_csv("data/test.csv")
-valid_df = pd.read_csv("data/valid.csv")
+path_file = "config/logging.ini"
+config = configparser.ConfigParser()
+config.read(path_file)
+log = ZLogger("hotel_reservation_system", config)
 
-# Define features and target variable for training, test, and validation
-X_train = train_df.drop(columns=['booking_status'])
-y_train = train_df['booking_status']
+class ModelTraining:
 
-X_test = test_df.drop(columns=['booking_status'])
-y_test = test_df['booking_status']
+    def __init__(self, train_path, test_path, model_output_path):
+        self.train_path = train_path
+        self.test_path = test_path
+        self.model_output_path =model_output_path
 
-X_valid = valid_df.drop(columns=['booking_status'])
-y_valid = valid_df['booking_status']
+        self.params_dist = LIGHTGM_PARAMS 
+        self.random_search_params = RANDOM_SEARCH_PARAMS
+    
+    def load_and_split_data(self):
 
-# Define multiple classifiers
-classifiers = {
-    "Random Forest": RandomForestClassifier(random_state=42),
-    "Logistic Regression": LogisticRegression(random_state=42),
-    "Gradient Boosting": GradientBoostingClassifier(random_state=42),
-    "Support Vector Classifier": SVC(random_state=42),
-    "Decision Tree": DecisionTreeClassifier(random_state=42),
-    "KNN": KNeighborsClassifier(),
-    "Naive Bayes": GaussianNB(),
-    "XGBoost": XGBClassifier(random_state=42),
-    "AdaBoost": AdaBoostClassifier(random_state=42),
-    "LGBM": LGBMClassifier(random_state=42)
-}
+        try:
+            
+            log.info(f'Loding train data from {self.train_path}')
+            train_df = load_data(self.train_path) 
 
-# Start an MLflow experiment
-mlflow.set_experiment("hotel_reservation_experiment")
+            log.info(f'Loding test data from {self.test_path}')
+            test_df = load_data(self.test_path) 
 
-# Train and evaluate each model
-results = {}
-for name, model in classifiers.items():
-    with mlflow.start_run():
-        print(f"Training {name}...")
-        
-        # Log the model name and parameters in MLflow
-        mlflow.log_param("model", name)
-        
-        # Train the model
-        model.fit(X_train, y_train)
-        
-        # Predict on the test set
-        y_pred = model.predict(X_test)
-        
-        # Calculate accuracy and log it in MLflow
-        accuracy = accuracy_score(y_test, y_pred)
-        mlflow.log_metric("accuracy", accuracy)
-        
-        # Log the classification report and confusion matrix as artifacts
-        classification_report_str = classification_report(y_test, y_pred)
-        confusion_matrix_str = str(confusion_matrix(y_test, y_pred))
-        
-        with open(f"models/{name.replace(' ', '_').lower()}_classification_report.txt", 'w') as f:
-            f.write(classification_report_str)
-        with open(f"models/{name.replace(' ', '_').lower()}_confusion_matrix.txt", 'w') as f:
-            f.write(confusion_matrix_str)
-        
-        mlflow.log_artifact(f"models/{name.replace(' ', '_').lower()}_classification_report.txt")
-        mlflow.log_artifact(f"models/{name.replace(' ', '_').lower()}_confusion_matrix.txt")
-        
-        # Log the trained model to MLflow
-        input_example = X_train.iloc[0].to_dict()  # Use the first row from training data as the input example
-        if name == "XGBoost":
-            mlflow.xgboost.log_model(model, name, input_example=input_example)
-        elif name == "LGBM":
-            mlflow.lightgbm.log_model(model, name, input_example=input_example)
-        else:
-            mlflow.sklearn.log_model(model, name, input_example=input_example)
-        
-        # Save the model locally as well
-        model_path = f"models/{name.replace(' ', '_').lower()}_model.pkl"
-        joblib.dump(model, model_path)
-        
-        results[name] = accuracy
+            X_train = train_df.drop(columns=['booking_status'])
+            y_train = train_df['booking_status'] 
 
-# Print the best model
-best_model = max(results, key=results.get)
-print(f"Best model: {best_model} with accuracy {results[best_model]:.4f}")
+            X_test = test_df.drop(columns=['booking_status'])
+            y_test = test_df ['booking_status'] 
 
-# Log the best model result to MLflow
-with mlflow.start_run():
-    mlflow.log_param("best_model", best_model)
-    mlflow.log_metric("best_model_accuracy", results[best_model])
+            log.info('Data splitted successfully for model training')
+            return X_train,y_train,X_test,y_test
+        except Exception as e:
+            log.error(f'Error while loading  data {e}')
+    
+    def train_lgbm(self, X_train, y_train):
+        try:
+            log.info('Inializing our model')
+
+            lgbm_model = lgb.LGBMClassifier(random_state=self.random_search_params['random_state'])
+
+            log.info('Starting our Hyperparamter tuning')
+
+            random_search = RandomizedSearchCV(
+                estimator=lgbm_model,
+                param_distributions=self.params_dist,
+                n_iter=self.random_search_params['n_iter'],
+                cv=self.random_search_params['cv'],
+                n_jobs=self.random_search_params['n_jobs'],
+                verbose=self.random_search_params['verbose'],
+                random_state=self.random_search_params['random_state'],
+                scoring=self.random_search_params['scoring']
+                
+            )
+
+            log.info('Starting model training')
+
+            random_search.fit(X_train, y_train)
+
+            log.info('End model training')
+
+            best_params = random_search.best_params_
+            best_lgbm_model = random_search.best_estimator_
+
+            log.info(f'Best Param are: {best_params}')
+
+            return best_lgbm_model
+        except Exception as e:
+            log.error(f'Error while training  data {e}')
+    
+    def evaluate_model(self , model , X_test , y_test):
+        try:
+            log.info("Evaluating our model")
+
+            y_pred = model.predict(X_test)
+
+            accuracy = accuracy_score(y_test,y_pred)
+            precision = precision_score(y_test,y_pred)
+            recall = recall_score(y_test,y_pred)
+            f1 = f1_score(y_test,y_pred)
+
+            log.info(f"Accuracy Score : {accuracy}")
+            log.info(f"Precision Score : {precision}")
+            log.info(f"Recall Score : {recall}")
+            log.info(f"F1 Score : {f1}")
+
+            return {
+                "accuracy" : accuracy,
+                "precison" : precision,
+                "recall" : recall,
+                "f1" : f1
+            }
+        except Exception as e:
+            log.error(f"Error while evaluating model {e}")
+    
+    def save_model(self,model):
+        try:
+            os.makedirs(os.path.dirname(self.model_output_path),exist_ok=True)
+
+            log.info("saving the model")
+            joblib.dump(model , self.model_output_path)
+            log.info(f"Model saved to {self.model_output_path}")
+
+        except Exception as e:
+            log.error(f"Error while saving model {e}")
+    
+    def run(self):
+        try:
+            with mlflow.start_run():
+                log.info("Starting our Model Training pipeline")
+
+                log.info("Starting our MLFLOW experimentation")
+
+                log.info("Logging the training and testing datset to MLFLOW")
+                mlflow.log_artifact(self.train_path , artifact_path="datasets")
+                mlflow.log_artifact(self.test_path , artifact_path="datasets")
+
+                X_train,y_train,X_test,y_test =self.load_and_split_data()
+                best_lgbm_model = self.train_lgbm(X_train,y_train)
+                metrics = self.evaluate_model(best_lgbm_model ,X_test , y_test)
+                self.save_model(best_lgbm_model)
+
+                log.info("Logging the model into MLFLOW")
+                mlflow.log_artifact(self.model_output_path)
+
+                log.info("Logging Params and metrics to MLFLOW")
+                mlflow.log_params(best_lgbm_model.get_params())
+                mlflow.log_metrics(metrics)
+
+                log.info("Model Training sucesfullly completed")
+
+        except Exception as e:
+            log.error(f"Error in model training pipeline {e}")
+
+
+if __name__=="__main__":
+    
+    trainer = ModelTraining('data/train.csv','data/test.csv','model/lgbm_model.pkl')
+    trainer.run()
