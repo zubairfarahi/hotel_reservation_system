@@ -48,14 +48,9 @@ To install and run this project locally, follow these steps:
 
 ## Usage
 
-1. **Run the data_ingestion:**
-    ```bash
-    python3 src/data_ingestion.py
-    ```
-
 2. **Run the Training:**
     ```bash
-    python3 src/train.py
+    python3 src/main.py
     ```
 ## Contributing
 

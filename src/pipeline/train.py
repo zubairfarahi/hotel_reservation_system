@@ -150,7 +150,3 @@ class ModelTraining:
             log.error(f"Error in model training pipeline {e}")
 
 
-if __name__=="__main__":
-    
-    trainer = ModelTraining('data/train.csv','data/test.csv','model/lgbm_model.pkl')
-    trainer.run()
